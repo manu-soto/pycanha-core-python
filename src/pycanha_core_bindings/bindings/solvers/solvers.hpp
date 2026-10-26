@@ -278,6 +278,11 @@ inline void register_solvers(nb::module_ &m) {
       "Each pass refactorises only when the matrix values differ from those of "
       "the last factorisation, so the second pass of a linear model costs one "
       "solve with the existing factors.")
+      .def_rw("correction_form", &SteadyStateSolver::correction_form,
+              "Solve each pass for the temperature change, A dT = b - A T, instead of the "
+              "temperatures (default True). The same answer from a direct solve; with SSLU_CGS "
+              "the iterative step's tolerance then bounds the error of the change, so a looser "
+              "pardiso_iparm_3 keeps the direct solver's answer.")
       .def_rw("allow_cholesky", &SteadyStateSolver::allow_cholesky,
               "With the MKL engine, factorise models without radiative couplings "
               "with Cholesky instead of LU (faster, less memory). With Eigen, "
