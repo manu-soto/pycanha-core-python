@@ -282,6 +282,12 @@ inline void register_solvers(nb::module_ &m) {
               "With the MKL engine, factorise models without radiative couplings "
               "with Cholesky instead of LU (faster, less memory). With Eigen, "
               "Cholesky is chosen with DirectSolverType.LDLT instead.")
+      .def_rw("cgs_refactor_iterations", &SteadyStateSolver::cgs_refactor_iterations,
+              "SSLU_CGS: factorise again at the next pass when the last pass needed more than "
+              "this many CGS/CG iterations on the previous factors (0, the default: only when "
+              "the iteration fails, PARDISO's rule). Over a sequence of solves whose "
+              "temperatures drift, as in a heater control loop, PARDISO's rule keeps the first "
+              "factors to the end and every pass iterates more.")
       .def_prop_ro("uses_cholesky", &SteadyStateSolver::uses_cholesky,
                    "Whether the last initialize() chose a Cholesky-type factorisation.")
       .def_prop_ro("num_factorizations", &SteadyStateSolver::num_factorizations,
