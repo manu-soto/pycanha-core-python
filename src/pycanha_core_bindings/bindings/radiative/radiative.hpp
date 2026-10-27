@@ -230,16 +230,18 @@ inline void register_radiative(nb::module_& m) {
           [](rad::TraceSettings* self, std::uint64_t rays_per_face,
              std::uint32_t seed, float energy_threshold,
              std::uint32_t max_bounces, bool normal_emission,
-             rad::Sampler sampler, rad::SolarSource solar_source) {
+             rad::Sampler sampler, rad::SolarSource solar_source,
+             bool robust_offset) {
             new (self) rad::TraceSettings{rays_per_face,   seed,
                                           energy_threshold, max_bounces,
                                           normal_emission, sampler,
-                                          solar_source};
+                                          solar_source,    robust_offset};
           },
           "rays_per_face"_a = 10'000, "seed"_a = 0,
           "energy_threshold"_a = 1e-4F, "max_bounces"_a = 64,
           "normal_emission"_a = false, "sampler"_a = rad::Sampler::Random,
           "solar_source"_a = rad::SolarSource::FaceSamples,
+          "robust_offset"_a = false,
           "Build trace settings.")
       .def_rw("rays_per_face", &rad::TraceSettings::rays_per_face,
               "Rays per emitting face, per accumulate() call.")
@@ -256,7 +258,10 @@ inline void register_radiative(nb::module_& m) {
               "Emission sampling: Sampler.Random (default) or Sampler.Sobol.")
       .def_rw("solar_source", &rad::TraceSettings::solar_source,
               "Solar ray origin: SolarSource.FaceSamples (default) or "
-              "SolarSource.SunPlane (rays_per_face is then the total).");
+              "SolarSource.SunPlane (rays_per_face is then the total).")
+      .def_rw("robust_offset", &rad::TraceSettings::robust_offset,
+              "Rays leave surfaces by a few float ULPs of the point (about "
+              "15 um at 1 m) instead of 1e-4 of the scene diagonal.");
 
   // Before AccumConfig: it appears there as a default argument value, and
   // nanobind converts a default to Python when the signature is defined rather
