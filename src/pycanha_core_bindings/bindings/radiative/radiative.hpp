@@ -49,6 +49,8 @@ inline void register_radiative(nb::module_& m) {
   // columns, then the energy that landed on faces in no node.
   m.attr("num_node_virtual_columns") = rad::num_node_virtual_columns;
   m.attr("unassigned_column_offset") = rad::unassigned_column_offset;
+  // NodeExchangeAccumulator's absorptance groups: at most this many.
+  m.attr("max_absorptance_groups") = rad::max_absorptance_groups;
 
   // ---- enums --------------------------------------------------------------
   nb::enum_<rad::PartKind>(m, "PartKind",
@@ -463,7 +465,22 @@ inline void register_radiative(nb::module_& m) {
           },
           nb::rv_policy::reference_internal,
           "TraceStats for this result (no per-entry standard errors or "
-          "reciprocity residual: those are face-pair quantities).");
+          "reciprocity residual: those are face-pair quantities).")
+      .def_prop_ro(
+          "absorptance_derivatives",
+          [](const rad::NodeExchangeResult& r) {
+            return r.absorptance_derivatives;
+          },
+          "list of scipy.sparse.csr_matrix, one per absorptance group the "
+          "accumulator was given (empty without groups), laid out as "
+          "`factors`: the derivative of every entry with respect to the band "
+          "absorptance a (the IR emissivity in the IR band) of all the faces "
+          "of the group, the reflectance taking a change of a with its "
+          "specular share kept and the transmittance fixed. Traced with the "
+          "same rays as `factors`: no second trace, no step. Only paths the "
+          "trace can take are scored: give a group faces with "
+          "0 < a < 1 - t (a face with a = 0 absorbs and emits nothing, a "
+          "black body reflects nothing, so their own parts are left out).");
 
   nb::class_<rad::SolarResult>(
       m, "SolarResult",
@@ -654,20 +671,31 @@ inline void register_radiative(nb::module_& m) {
           "__init__",
           [](rad::NodeExchangeAccumulator* self,
              const rad::RadiativeScene& scene, rad::Band band,
-             const Eigen::VectorXi& node_numbers, rad::AccumConfig config) {
+             const Eigen::VectorXi& node_numbers, rad::AccumConfig config,
+             const std::optional<Eigen::VectorXi>& absorptance_groups) {
+            std::span<const std::int32_t> groups;
+            if (absorptance_groups.has_value()) {
+              groups = std::span<const std::int32_t>(
+                  absorptance_groups->data(),
+                  static_cast<std::size_t>(absorptance_groups->size()));
+            }
             new (self) rad::NodeExchangeAccumulator(
                 scene, band,
                 std::span<const NodeNum>(
                     node_numbers.data(),
                     static_cast<std::size_t>(node_numbers.size())),
-                config);
+                config, groups);
           },
           "scene"_a, "band"_a, "node_numbers"_a,
-          "config"_a = rad::AccumConfig{}, nb::keep_alive<1, 2>(),
+          "config"_a = rad::AccumConfig{},
+          "absorptance_groups"_a = nb::none(), nb::keep_alive<1, 2>(),
           "Allocate a node accumulator for `scene` in `band`. node_numbers: "
           "one per scene face, -1 (NO_NODE) for a face in no node, as "
           "aggregate_matrix takes them. Layout Dense (node x node on the "
-          "card) by default, or Tiled over node rows.")
+          "card) by default, or Tiled over node rows. absorptance_groups "
+          "(optional, Dense only): one per scene face, -1 for none or 0 to "
+          "max_absorptance_groups - 1; the result then also holds each "
+          "group's absorptance_derivatives, traced with the same rays.")
       .def("reset", &rad::NodeExchangeAccumulator::reset,
            "Clear all accumulated energy and the emitter set.")
       .def("result", &rad::NodeExchangeAccumulator::result,
