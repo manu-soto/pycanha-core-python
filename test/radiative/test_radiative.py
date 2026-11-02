@@ -606,6 +606,70 @@ class TestExchangeEndToEnd:
         )
         assert result.stats.rays_per_face == 4096
 
+    def test_node_accumulator_absorptance_derivatives(self):
+        device = rad.Device.create()
+        model = _build_facing_panels_model()
+        active = np.asarray(model.material_table().face_active)
+
+        # Panel A in material 0, panel B in material 1, both diffuse.
+        def table(a_panel_a):
+            props = np.array(
+                [
+                    [a_panel_a, 0.0, 0.0, a_panel_a, 0.0, 0.0],
+                    [0.75, 0.0, 0.0, 0.75, 0.0, 0.0],
+                ],
+                dtype=np.float32,
+            )
+            face_material = np.array([0, 0, 1, 1], dtype=np.int32)
+            return rad.MaterialTable(props, face_material, active)
+
+        scene = rad.RadiativeScene(device, model.mesh_parts(), table(0.5))
+        node_numbers = np.array([10, 11, 20, -1], dtype=np.int32)
+        groups = np.array([0, 0, -1, -1], dtype=np.int32)
+        # No Russian roulette: the same seed then follows the same paths
+        # whatever panel A's absorptance.
+        settings = rad.TraceSettings(
+            rays_per_face=4096, seed=1, energy_threshold=0.0
+        )
+
+        def trace(absorptance_groups=None):
+            acc = rad.NodeExchangeAccumulator(
+                scene,
+                rad.Band.IR,
+                node_numbers,
+                absorptance_groups=absorptance_groups,
+            )
+            scene.accumulate_exchange(acc, settings)
+            return acc.result()
+
+        central = trace(groups)
+        assert rad.max_absorptance_groups == 4
+        assert len(central.absorptance_derivatives) == 1
+        assert trace().absorptance_derivatives == []
+        derivative = central.absorptance_derivatives[0].toarray()
+        values = central.factors.toarray()
+        assert derivative.shape == values.shape
+
+        step = 1.0 / 1024.0
+        scene.update_materials(table(0.5 + step))
+        up = trace().factors.toarray()
+        scene.update_materials(table(0.5 - step))
+        down = trace().factors.toarray()
+        expected = (up - down) / (2.0 * step)
+        assert np.abs(expected).max() > 0.0
+        np.testing.assert_array_less(
+            np.abs(derivative - expected),
+            2e-3 * (np.abs(expected) + np.abs(values)) + 1e-300,
+        )
+
+        with pytest.raises(ValueError):
+            rad.NodeExchangeAccumulator(
+                scene,
+                rad.Band.IR,
+                node_numbers,
+                absorptance_groups=np.array([0, 0, 4, -1], dtype=np.int32),
+            )
+
 
 def _build_facing_panels_model():
     """Two unit panels half a unit apart, facing each other."""
