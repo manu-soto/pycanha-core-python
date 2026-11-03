@@ -665,14 +665,16 @@ inline void register_radiative(nb::module_& m) {
       "cells on the GPU instead of face x face, so memory follows the node "
       "pairs and does not grow with the rays. The result is the face result "
       "summed by aggregate_matrix, up to float rounding. Every batch must "
-      "trace the same emitters with the same rays for each; TriangulationMode "
+      "trace the same emitters with the same rays for each (or a part of a "
+      "rays_per_face allocation, each face once); TriangulationMode "
       "None or RayDensity; keep_full_matrix off. Vulkan only.")
       .def(
           "__init__",
           [](rad::NodeExchangeAccumulator* self,
              const rad::RadiativeScene& scene, rad::Band band,
              const Eigen::VectorXi& node_numbers, rad::AccumConfig config,
-             const std::optional<Eigen::VectorXi>& absorptance_groups) {
+             const std::optional<Eigen::VectorXi>& absorptance_groups,
+             const std::optional<std::vector<std::uint64_t>>& rays_per_face) {
             std::span<const std::int32_t> groups;
             if (absorptance_groups.has_value()) {
               groups = std::span<const std::int32_t>(
@@ -684,18 +686,29 @@ inline void register_radiative(nb::module_& m) {
                 std::span<const NodeNum>(
                     node_numbers.data(),
                     static_cast<std::size_t>(node_numbers.size())),
-                config, groups);
+                config, groups,
+                rays_per_face.has_value()
+                    ? std::span<const std::uint64_t>(*rays_per_face)
+                    : std::span<const std::uint64_t>{});
           },
           "scene"_a, "band"_a, "node_numbers"_a,
           "config"_a = rad::AccumConfig{},
-          "absorptance_groups"_a = nb::none(), nb::keep_alive<1, 2>(),
+          "absorptance_groups"_a = nb::none(), "rays_per_face"_a = nb::none(),
+          nb::keep_alive<1, 2>(),
           "Allocate a node accumulator for `scene` in `band`. node_numbers: "
           "one per scene face, -1 (NO_NODE) for a face in no node, as "
           "aggregate_matrix takes them. Layout Dense (node x node on the "
           "card) by default, or Tiled over node rows. absorptance_groups "
           "(optional, Dense only): one per scene face, -1 for none or 0 to "
           "max_absorptance_groups - 1; the result then also holds each "
-          "group's absorptance_derivatives, traced with the same rays.")
+          "group's absorptance_derivatives, traced with the same rays. "
+          "rays_per_face (optional): one per scene face, a per-face ray "
+          "allocation (0: not traced); each batch then traces some of these "
+          "faces with the rays allocated to them, every allocated face of a "
+          "node once before result(); the result is normalised as a uniform "
+          "trace of the fewest rays any such face has (stats.rays_per_face), "
+          "the same expectation whatever the allocation. With RayDensity it "
+          "needs TriangulationConfig.area_weights.")
       .def("reset", &rad::NodeExchangeAccumulator::reset,
            "Clear all accumulated energy and the emitter set.")
       .def("result", &rad::NodeExchangeAccumulator::result,
