@@ -609,6 +609,56 @@ class TestExchangeEndToEnd:
         )
         assert result.stats.rays_per_face == 4096
 
+    def test_node_accumulator_rays_per_face(self):
+        device = rad.Device.create()
+        model = _build_facing_panels_model()
+        scene = rad.RadiativeScene(
+            device, model.mesh_parts(), model.material_table()
+        )
+        node_numbers = np.array([10, 11, 20, -1], dtype=np.int32)
+        # Panel A's inner side 4x the rays of panel B's, its outer side none;
+        # the directions of a pair weighed by area.
+        rays = [4096, 0, 1024, 0]
+        config = rad.AccumConfig(
+            triangulation=rad.TriangulationConfig(area_weights=True)
+        )
+
+        faces = rad.ExchangeAccumulator(scene, rad.Band.IR, config)
+        scene.accumulate_exchange(
+            faces, rad.TraceSettings(rays_per_face=4096, seed=1), [0]
+        )
+        scene.accumulate_exchange(
+            faces, rad.TraceSettings(rays_per_face=1024, seed=1), [2]
+        )
+        summed = rad.aggregate_matrix(faces.result().factors, node_numbers)
+
+        nodes = rad.NodeExchangeAccumulator(
+            scene, rad.Band.IR, node_numbers, config, rays_per_face=rays
+        )
+        scene.accumulate_exchange(
+            nodes, rad.TraceSettings(rays_per_face=1024, seed=1), [2]
+        )
+        with pytest.raises(RuntimeError):
+            nodes.result()  # face 0 not traced yet
+        with pytest.raises(ValueError):
+            scene.accumulate_exchange(
+                nodes, rad.TraceSettings(rays_per_face=1024, seed=1), [0]
+            )
+        scene.accumulate_exchange(
+            nodes, rad.TraceSettings(rays_per_face=4096, seed=1), [0]
+        )
+        result = nodes.result()
+        couplings = result.factors.toarray()[:, :3]
+        expected = _densify(summed.matrix)
+        assert expected[0, 2] > 0.0
+        np.testing.assert_allclose(couplings, expected, rtol=2e-6, atol=1e-12)
+        assert result.stats.rays_per_face == 1024
+
+        with pytest.raises(ValueError):
+            rad.NodeExchangeAccumulator(
+                scene, rad.Band.IR, node_numbers, rays_per_face=[1, 2, 3]
+            )
+
     def test_node_accumulator_absorptance_derivatives(self):
         device = rad.Device.create()
         model = _build_facing_panels_model()
